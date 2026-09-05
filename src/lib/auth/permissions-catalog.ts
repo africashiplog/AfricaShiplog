@@ -28,6 +28,9 @@ export const PERMISSIONS: PermissionDef[] = [
   // Vehicles / drivers
   { code: "vehicles.manage", module: "vehicles", action: "manage", description: "Manage vehicles", descriptionAr: "إدارة المركبات" },
   { code: "drivers.manage", module: "drivers", action: "manage", description: "Manage drivers", descriptionAr: "إدارة السائقين" },
+  // Routes (priced lines between branches)
+  { code: "routes.view", module: "routes", action: "view", description: "View routes", descriptionAr: "عرض الخطوط" },
+  { code: "routes.manage", module: "routes", action: "manage", description: "Create/edit routes", descriptionAr: "إدارة الخطوط" },
   // Trips
   { code: "trips.view", module: "trips", action: "view", description: "View trips", descriptionAr: "عرض الرحلات" },
   { code: "trips.create", module: "trips", action: "create", description: "Create trips", descriptionAr: "إنشاء رحلات" },
@@ -85,6 +88,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     "branches.view",
     "customers.view", "customers.create", "customers.edit",
     "vehicles.manage", "drivers.manage",
+    "routes.view", "routes.manage",
     "trips.view", "trips.create", "trips.edit", "trips.cancel",
     "tickets.view", "tickets.create", "tickets.edit", "tickets.cancel", "tickets.refund",
     "parcels.view", "parcels.create", "parcels.edit", "parcels.deliver", "parcels.cancel",
@@ -95,6 +99,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   BRANCH_MANAGER: [
     "customers.view", "customers.create", "customers.edit",
+    "routes.view",
     "trips.view", "trips.create", "trips.edit",
     "tickets.view", "tickets.create", "tickets.edit", "tickets.cancel", "tickets.refund",
     "parcels.view", "parcels.create", "parcels.edit", "parcels.deliver", "parcels.cancel",
@@ -105,11 +110,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   TICKET_AGENT: [
     "customers.view", "customers.create",
+    "routes.view",
     "trips.view",
     "tickets.view", "tickets.create", "tickets.edit", "tickets.cancel",
   ],
   PARCEL_AGENT: [
     "customers.view", "customers.create",
+    "routes.view",
     "parcels.view", "parcels.create", "parcels.edit", "parcels.deliver",
   ],
   ACCOUNTANT: [

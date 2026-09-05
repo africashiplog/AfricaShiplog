@@ -10,6 +10,10 @@ interface PaymentMethod {
   id: string;
   nameAr: string;
 }
+interface TripRef {
+  id: string;
+  tripNumber: string;
+}
 interface ExpenseRow {
   id: string;
   amount: string;
@@ -19,20 +23,23 @@ interface ExpenseRow {
   category: { nameAr: string };
   paymentMethod: { nameAr: string };
   user: { fullNameAr: string | null; fullName: string };
+  trip: TripRef | null;
 }
 
-const emptyForm = { categoryId: "", amount: "", paymentMethodId: "", description: "", referenceNumber: "" };
+const emptyForm = { categoryId: "", amount: "", paymentMethodId: "", description: "", referenceNumber: "", tripId: "" };
 
 export default function ExpensesManager({
   initialExpenses,
   categories,
   paymentMethods,
+  trips,
   canCreate,
   canApprove,
 }: {
   initialExpenses: ExpenseRow[];
   categories: Category[];
   paymentMethods: PaymentMethod[];
+  trips: TripRef[];
   canCreate: boolean;
   canApprove: boolean;
 }) {
@@ -104,6 +111,7 @@ export default function ExpensesManager({
               <th className="px-4 py-3 text-start font-medium">المبلغ</th>
               <th className="px-4 py-3 text-start font-medium">طريقة الدفع</th>
               <th className="px-4 py-3 text-start font-medium">الموظف</th>
+              <th className="px-4 py-3 text-start font-medium">الرحلة</th>
               <th className="px-4 py-3 text-start font-medium">الحالة</th>
               {canApprove && <th className="px-4 py-3 text-start font-medium">إجراءات</th>}
             </tr>
@@ -117,6 +125,7 @@ export default function ExpensesManager({
                 <td className="ltr-nums px-4 py-3">{e.amount}</td>
                 <td className="px-4 py-3">{e.paymentMethod.nameAr}</td>
                 <td className="px-4 py-3">{e.user.fullNameAr ?? e.user.fullName}</td>
+                <td className="ltr-nums px-4 py-3 text-xs">{e.trip?.tripNumber ?? "—"}</td>
                 <td className="px-4 py-3">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${e.voidedAt ? "bg-slate-200 text-slate-600" : "bg-green-100 text-green-700"}`}>
                     {e.voidedAt ? "مبطل" : "سارٍ"}
@@ -135,7 +144,7 @@ export default function ExpensesManager({
             ))}
             {expenses.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
                   لا توجد مصروفات بعد
                 </td>
               </tr>
@@ -172,6 +181,17 @@ export default function ExpensesManager({
               </label>
               <Field label="الوصف" value={form.description} onChange={(v) => setForm({ ...form, description: v })} required />
               <Field label="رقم مرجعي (اختياري)" value={form.referenceNumber} onChange={(v) => setForm({ ...form, referenceNumber: v })} dir="ltr" />
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">الرحلة المرتبطة (اختياري)</span>
+                <select value={form.tripId} onChange={(e) => setForm({ ...form, tripId: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2">
+                  <option value="">— مصروف متنوّع (غير مرتبط) —</option>
+                  {trips.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.tripNumber}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>}
 

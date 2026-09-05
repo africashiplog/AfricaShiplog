@@ -7,20 +7,22 @@ export interface NavItem {
   href: string;
   label: string;
   permission?: string; // omit for links every authenticated user can see
+  anyPermission?: string[]; // visible if the user holds ANY of these (used for pages made of multiple tabs)
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "لوحة التحكم" },
-  { href: "/dashboard/branches", label: "الفروع", permission: "branches.view" },
+  { href: "/dashboard", label: "لوحة القيادة" },
+  { href: "/dashboard/tickets", label: "التذاكر", permission: "tickets.view" },
+  { href: "/dashboard/parcels", label: "الطرود / البريد", permission: "parcels.view" },
+  { href: "/dashboard/trips", label: "إدارة الرحلات", permission: "trips.view" },
   { href: "/dashboard/customers", label: "العملاء", permission: "customers.view" },
-  { href: "/dashboard/trips", label: "الرحلات", permission: "trips.view" },
-  { href: "/dashboard/parcels", label: "الطرود", permission: "parcels.view" },
-  { href: "/dashboard/fleet", label: "المركبات والسائقون", permission: "vehicles.manage" },
+  { href: "/dashboard/audit-log", label: "السجل", permission: "audit.view" },
   { href: "/dashboard/cash-registers", label: "الصناديق النقدية", permission: "cash.view" },
-  { href: "/dashboard/expenses", label: "المصروفات", permission: "expenses.view" },
-  { href: "/dashboard/reports", label: "التقارير", permission: "reports.view" },
-  { href: "/dashboard/analytics", label: "التحليلات المالية", permission: "analytics.view" },
-  { href: "/dashboard/settings/whatsapp", label: "واتساب", permission: "whatsapp.manage" },
-  { href: "/dashboard/users", label: "المستخدمون", permission: "users.view" },
-  { href: "/dashboard/roles", label: "الأدوار والصلاحيات", permission: "roles.manage" },
+  { href: "/dashboard/daily-closing", label: "إغلاق الصندوق", permission: "cash.close" },
+  { href: "/dashboard/accounting", label: "المحاسبة", permission: "expenses.view" },
+  {
+    href: "/dashboard/settings",
+    label: "الإعدادات",
+    anyPermission: ["settings.manage", "users.manage", "users.view", "branches.manage", "roles.manage", "vehicles.manage", "routes.manage", "whatsapp.manage"],
+  },
 ];

@@ -4,6 +4,7 @@ export const tripInputSchema = z
   .object({
     vehicleId: z.string().trim().optional().nullable(),
     driverId: z.string().trim().optional().nullable(),
+    routeId: z.string().trim().optional().nullable(),
     originBranchId: z.string().trim().min(1, "فرع المغادرة مطلوب"),
     destinationBranchId: z.string().trim().min(1, "فرع الوجهة مطلوب"),
     departureDate: z.coerce.date({ message: "تاريخ ووقت المغادرة غير صالح" }),

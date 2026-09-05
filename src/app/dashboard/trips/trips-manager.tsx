@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { formatMoney } from "@/lib/format";
 
 interface BranchRef {
   id: string;
@@ -14,6 +15,12 @@ interface VehicleRef {
 interface DriverRef {
   id: string;
   name: string;
+}
+interface RouteRef {
+  id: string;
+  originBranch: BranchRef;
+  destinationBranch: BranchRef;
+  pricePerPassenger: string;
 }
 interface Trip {
   id: string;
@@ -38,6 +45,7 @@ const STATUS_AR: Record<string, string> = {
 };
 
 const emptyForm = {
+  routeId: "",
   originBranchId: "",
   destinationBranchId: "",
   departureDate: "",
@@ -52,12 +60,14 @@ export default function TripsManager({
   branches,
   vehicles,
   drivers,
+  routes,
   canCreate,
 }: {
   initialTrips: Trip[];
   branches: BranchRef[];
   vehicles: VehicleRef[];
   drivers: DriverRef[];
+  routes: RouteRef[];
   canCreate: boolean;
 }) {
   const [trips, setTrips] = useState(initialTrips);
@@ -65,6 +75,21 @@ export default function TripsManager({
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function selectRoute(routeId: string) {
+    const route = routes.find((r) => r.id === routeId);
+    if (!route) {
+      setForm({ ...form, routeId: "" });
+      return;
+    }
+    setForm({
+      ...form,
+      routeId,
+      originBranchId: route.originBranch.id,
+      destinationBranchId: route.destinationBranch.id,
+      basePrice: route.pricePerPassenger,
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -76,6 +101,7 @@ export default function TripsManager({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
+          routeId: form.routeId || null,
           vehicleId: form.vehicleId || null,
           driverId: form.driverId || null,
           departureDate: new Date(form.departureDate).toISOString(),
@@ -99,7 +125,7 @@ export default function TripsManager({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">الرحلات</h1>
+        <h1 className="text-xl font-bold text-slate-900">إدارة الرحلات</h1>
         {canCreate && (
           <button onClick={() => setShowForm(true)} className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark">
             + رحلة جديدة
@@ -131,7 +157,7 @@ export default function TripsManager({
                   {t.originBranch.nameAr} ← {t.destinationBranch.nameAr}
                 </td>
                 <td className="ltr-nums px-4 py-3">{new Date(t.departureDate).toLocaleString("ar")}</td>
-                <td className="ltr-nums px-4 py-3">{t.basePrice}</td>
+                <td className="ltr-nums px-4 py-3">{formatMoney(t.basePrice)}</td>
                 <td className="ltr-nums px-4 py-3">
                   {t._count.tickets} / {t.seatCapacity}
                 </td>
@@ -156,9 +182,26 @@ export default function TripsManager({
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-lg">
             <h2 className="mb-4 text-lg font-semibold text-slate-800">رحلة جديدة</h2>
             <form onSubmit={handleSubmit} className="space-y-3">
+              {routes.length > 0 && (
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-slate-700">الخط (اختياري — يملأ الوجهة والسعر تلقائيًا)</span>
+                  <select
+                    value={form.routeId}
+                    onChange={(e) => selectRoute(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+                  >
+                    <option value="">— اختيار يدوي —</option>
+                    {routes.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.originBranch.nameAr} ← {r.destinationBranch.nameAr} ({formatMoney(r.pricePerPassenger)})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div className="grid grid-cols-2 gap-3">
-                <SelectField label="فرع المغادرة" value={form.originBranchId} onChange={(v) => setForm({ ...form, originBranchId: v })} options={branches} required />
-                <SelectField label="فرع الوجهة" value={form.destinationBranchId} onChange={(v) => setForm({ ...form, destinationBranchId: v })} options={branches} required />
+                <SelectField label="فرع المغادرة" value={form.originBranchId} onChange={(v) => setForm({ ...form, originBranchId: v, routeId: "" })} options={branches} required />
+                <SelectField label="فرع الوجهة" value={form.destinationBranchId} onChange={(v) => setForm({ ...form, destinationBranchId: v, routeId: "" })} options={branches} required />
               </div>
               <label className="block text-sm">
                 <span className="mb-1 block font-medium text-slate-700">تاريخ ووقت المغادرة</span>

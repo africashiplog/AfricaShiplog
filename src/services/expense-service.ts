@@ -15,6 +15,7 @@ const expenseInclude = {
   category: true,
   paymentMethod: true,
   user: { select: { id: true, fullName: true, fullNameAr: true } },
+  trip: { select: { id: true, tripNumber: true } },
   financialTransaction: true,
 } as const;
 
@@ -40,6 +41,11 @@ export async function createExpense(
   const paymentMethod = await prisma.paymentMethod.findFirst({ where: { id: input.paymentMethodId, isActive: true } });
   if (!paymentMethod) throw new ExpenseServiceError("طريقة الدفع غير صالحة", 400);
 
+  if (input.tripId) {
+    const trip = await prisma.trip.findFirst({ where: { id: input.tripId, deletedAt: null } });
+    if (!trip) throw new ExpenseServiceError("الرحلة المرتبطة غير موجودة", 404);
+  }
+
   let cashRegisterSessionId: string | null = null;
   try {
     cashRegisterSessionId = await resolveCashSessionForPayment(ctx.branchId, paymentMethod.requiresCashRegister);
@@ -58,6 +64,7 @@ export async function createExpense(
         amount,
         paymentMethodId: input.paymentMethodId,
         cashRegisterSessionId,
+        tripId: input.tripId || null,
         userId: ctx.userId,
         description: input.description,
         referenceNumber: input.referenceNumber || null,

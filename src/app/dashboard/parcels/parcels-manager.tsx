@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { formatMoney } from "@/lib/format";
 
 interface BranchRef {
   id: string;
@@ -11,6 +12,12 @@ interface BranchRef {
 interface PaymentMethod {
   id: string;
   nameAr: string;
+}
+interface RouteRef {
+  id: string;
+  originBranch: { id: string; nameAr: string };
+  destinationBranch: BranchRef;
+  pricePerKg: string;
 }
 interface ParcelRow {
   id: string;
@@ -38,6 +45,7 @@ const STATUS_AR: Record<string, string> = {
 };
 
 const emptyForm = {
+  routeId: "",
   senderName: "",
   senderPhone: "",
   senderAddress: "",
@@ -59,11 +67,13 @@ export default function ParcelsManager({
   initialParcels,
   branches,
   paymentMethods,
+  routes,
   canCreate,
 }: {
   initialParcels: ParcelRow[];
   branches: BranchRef[];
   paymentMethods: PaymentMethod[];
+  routes: RouteRef[];
   canCreate: boolean;
 }) {
   const router = useRouter();
@@ -73,6 +83,17 @@ export default function ParcelsManager({
   const [form, setForm] = useState({ ...emptyForm, paymentMethodId: paymentMethods[0]?.id ?? "" });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function selectRoute(routeId: string) {
+    const route = routes.find((r) => r.id === routeId);
+    if (!route) {
+      setForm({ ...form, routeId: "" });
+      return;
+    }
+    const weight = Number(form.weightKg) || 0;
+    const suggestedPrice = weight > 0 ? (weight * Number(route.pricePerKg)).toFixed(2) : form.shippingPrice;
+    setForm({ ...form, routeId, destinationBranchId: route.destinationBranch.id, shippingPrice: suggestedPrice });
+  }
 
   async function runSearch(q: string) {
     setQuery(q);
@@ -182,13 +203,30 @@ export default function ParcelsManager({
                 </fieldset>
               </div>
 
+              {routes.length > 0 && (
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium text-slate-700">الخط (اختياري — يملأ الوجهة وسعر الشحن تلقائيًا حسب الوزن)</span>
+                  <select
+                    value={form.routeId}
+                    onChange={(e) => selectRoute(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                  >
+                    <option value="">— اختيار يدوي —</option>
+                    {routes.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.originBranch.nameAr} ← {r.destinationBranch.nameAr} ({formatMoney(r.pricePerKg)}/كغ)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div className="grid grid-cols-3 gap-3">
                 <label className="block text-sm">
                   <span className="mb-1 block font-medium text-slate-700">فرع الوجهة</span>
                   <select
                     required
                     value={form.destinationBranchId}
-                    onChange={(e) => setForm({ ...form, destinationBranchId: e.target.value })}
+                    onChange={(e) => setForm({ ...form, destinationBranchId: e.target.value, routeId: "" })}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2"
                   >
                     <option value="">—</option>
@@ -200,7 +238,18 @@ export default function ParcelsManager({
                   </select>
                 </label>
                 <Field label="عدد القطع" value={form.piecesCount} onChange={(v) => setForm({ ...form, piecesCount: v })} dir="ltr" type="number" />
-                <Field label="الوزن (كجم)" value={form.weightKg} onChange={(v) => setForm({ ...form, weightKg: v })} dir="ltr" type="number" />
+                <Field
+                  label="الوزن (كجم)"
+                  value={form.weightKg}
+                  onChange={(v) => {
+                    const route = routes.find((r) => r.id === form.routeId);
+                    const weight = Number(v) || 0;
+                    const suggestedPrice = route && weight > 0 ? (weight * Number(route.pricePerKg)).toFixed(2) : form.shippingPrice;
+                    setForm({ ...form, weightKg: v, shippingPrice: suggestedPrice });
+                  }}
+                  dir="ltr"
+                  type="number"
+                />
               </div>
 
               <div className="grid grid-cols-3 gap-3">

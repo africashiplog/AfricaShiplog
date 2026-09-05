@@ -141,6 +141,8 @@ model Branch {
   drivers               Driver[]
   tripsOrigin           Trip[]                 @relation("TripOrigin")
   tripsDestination      Trip[]                 @relation("TripDestination")
+  routesOrigin          Route[]                @relation("RouteOrigin")
+  routesDestination     Route[]                @relation("RouteDestination")
   ticketsSold           Ticket[]
   parcelsOrigin         Parcel[]               @relation("ParcelOrigin")
   parcelsDestination    Parcel[]               @relation("ParcelDestination")
@@ -229,6 +231,29 @@ enum TripStatus {
   CANCELLED
 }
 
+// A priced line between two branches — distance + per-passenger + per-kg
+// parcel rate. Trips and parcels may pick a route to auto-fill destination
+// and price (still overridable per trip/parcel for discounts or ad-hoc runs
+// that don't match an existing route).
+model Route {
+  id                  String   @id @default(cuid())
+  originBranchId      String
+  originBranch        Branch   @relation("RouteOrigin", fields: [originBranchId], references: [id])
+  destinationBranchId String
+  destinationBranch   Branch   @relation("RouteDestination", fields: [destinationBranchId], references: [id])
+  distanceKm          Decimal  @db.Decimal(10, 2)
+  pricePerPassenger   Decimal  @db.Decimal(14, 2)
+  pricePerKg          Decimal  @db.Decimal(14, 2)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  trips   Trip[]
+  parcels Parcel[]
+
+  @@unique([originBranchId, destinationBranchId])
+}
+
 model Trip {
   id                  String     @id @default(cuid())
   tripNumber          String     @unique
@@ -236,6 +261,8 @@ model Trip {
   vehicle             Vehicle?   @relation(fields: [vehicleId], references: [id])
   driverId            String?
   driver              Driver?    @relation(fields: [driverId], references: [id])
+  routeId             String?
+  route               Route?     @relation(fields: [routeId], references: [id])
   originBranchId      String
   originBranch        Branch     @relation("TripOrigin", fields: [originBranchId], references: [id])
   destinationBranchId String
@@ -249,8 +276,9 @@ model Trip {
   updatedAt           DateTime   @updatedAt
   deletedAt           DateTime?
 
-  seats   Seat[]
-  tickets Ticket[]
+  seats    Seat[]
+  tickets  Ticket[]
+  expenses Expense[]
 
   @@index([originBranchId, destinationBranchId, departureDate])
   @@index([status])
@@ -389,6 +417,8 @@ model Parcel {
   widthCm             Decimal?     @db.Decimal(10, 2)
   heightCm            Decimal?     @db.Decimal(10, 2)
   serviceType         String? // e.g. standard, express
+  routeId             String?
+  route               Route?       @relation(fields: [routeId], references: [id])
   originBranchId      String
   originBranch        Branch       @relation("ParcelOrigin", fields: [originBranchId], references: [id])
   destinationBranchId String
@@ -559,7 +589,7 @@ model FinancialTransaction {
   referenceNumber       String                   @unique
   type                  FinancialTransactionType
   amount                Decimal                  @db.Decimal(14, 2) // always positive; direction implied by type
-  currency              String                   @default("XOF")
+  currency              String                   @default("MRU")
   paymentMethodId       String
   paymentMethod         PaymentMethod            @relation(fields: [paymentMethodId], references: [id])
   branchId              String
@@ -618,6 +648,8 @@ model Expense {
   paymentMethod         PaymentMethod        @relation(fields: [paymentMethodId], references: [id])
   cashRegisterSessionId String?
   cashRegisterSession   CashRegisterSession? @relation(fields: [cashRegisterSessionId], references: [id])
+  tripId                String? // links an expense (e.g. fuel) to the trip it belongs to, enabling real per-trip profitability
+  trip                  Trip?                @relation(fields: [tripId], references: [id])
   userId                String
   user                  User                 @relation(fields: [userId], references: [id])
   occurredAt            DateTime             @default(now())
@@ -633,6 +665,7 @@ model Expense {
 
   @@index([branchId, occurredAt])
   @@index([categoryId])
+  @@index([tripId])
 }
 
 // ----------------------------------------------------------------------------

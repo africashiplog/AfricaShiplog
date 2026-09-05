@@ -67,6 +67,10 @@ export async function createTrip(input: TripInput) {
     const driver = await prisma.driver.findFirst({ where: { id: input.driverId, deletedAt: null } });
     if (!driver) throw new TripServiceError("السائق غير موجود", 404);
   }
+  if (input.routeId) {
+    const route = await prisma.route.findUnique({ where: { id: input.routeId } });
+    if (!route) throw new TripServiceError("الخط غير موجود", 404);
+  }
 
   return withUniqueRetry(() =>
     prisma.$transaction(async (tx) => {
@@ -75,6 +79,7 @@ export async function createTrip(input: TripInput) {
           tripNumber: generateTripNumber(),
           vehicleId: input.vehicleId || null,
           driverId: input.driverId || null,
+          routeId: input.routeId || null,
           originBranchId: input.originBranchId,
           destinationBranchId: input.destinationBranchId,
           departureDate: input.departureDate,

@@ -14,6 +14,7 @@ export const createParcelSchema = z.object({
   widthCm: z.coerce.number().min(0).optional().nullable(),
   heightCm: z.coerce.number().min(0).optional().nullable(),
   serviceType: z.string().trim().optional().nullable(),
+  routeId: z.string().trim().optional().nullable(),
   destinationBranchId: z.string().trim().min(1, "فرع الوجهة مطلوب"),
   shippingPrice: z.coerce.number().min(0, "سعر الشحن غير صالح"),
   discount: z.coerce.number().min(0).default(0),

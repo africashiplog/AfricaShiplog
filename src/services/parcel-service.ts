@@ -32,6 +32,10 @@ export async function createParcel(input: CreateParcelInput, ctx: CreateParcelCo
   if (destinationBranch.id === ctx.originBranchId) {
     throw new ParcelServiceError("فرع الوجهة يجب أن يختلف عن فرع الاستلام", 400);
   }
+  if (input.routeId) {
+    const route = await prisma.route.findUnique({ where: { id: input.routeId } });
+    if (!route) throw new ParcelServiceError("الخط غير موجود", 404);
+  }
 
   const shippingPrice = new Prisma.Decimal(input.shippingPrice);
   const discount = new Prisma.Decimal(input.discount);
@@ -79,6 +83,7 @@ export async function createParcel(input: CreateParcelInput, ctx: CreateParcelCo
           widthCm: input.widthCm ?? null,
           heightCm: input.heightCm ?? null,
           serviceType: input.serviceType || null,
+          routeId: input.routeId || null,
           originBranchId: ctx.originBranchId,
           destinationBranchId: input.destinationBranchId,
           shippingPrice,
