@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser, userHasPermission } from "@/lib/auth/current-user";
-import { listRegistersForBranch } from "@/services/cash-register-service";
+import { listRegistersForBranch, listSessionsForBranch } from "@/services/cash-register-service";
 import { listBranches } from "@/services/branch-service";
 import CashRegistersManager from "./cash-registers-manager";
 
@@ -15,7 +15,9 @@ export default async function CashRegistersPage({ searchParams }: { searchParams
   const branches = await listBranches(false);
   const branchId = user.branchId ?? queryBranchId ?? branches[0]?.id;
 
-  const registers = branchId ? await listRegistersForBranch(branchId) : [];
+  const [registers, sessions] = branchId
+    ? await Promise.all([listRegistersForBranch(branchId), listSessionsForBranch(branchId)])
+    : [[], []];
 
   return (
     <div className="space-y-4">
@@ -43,7 +45,10 @@ export default async function CashRegistersPage({ searchParams }: { searchParams
           name: r.name,
           openSession: r.sessions[0] ?? null,
         }))}
+        initialSessions={JSON.parse(JSON.stringify(sessions))}
         canOpen={userHasPermission(user, "cash.open")}
+        canClose={userHasPermission(user, "cash.close")}
+        canReopen={userHasPermission(user, "cash.reopen")}
       />
     </div>
   );
