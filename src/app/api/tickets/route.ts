@@ -11,7 +11,11 @@ export async function GET(req: NextRequest) {
   const { user } = auth;
 
   const tripId = req.nextUrl.searchParams.get("tripId") || undefined;
-  const branchId = req.nextUrl.searchParams.get("branchId") || user.branchId || undefined;
+  const requestedBranchId = req.nextUrl.searchParams.get("branchId") || undefined;
+  if (requestedBranchId && !userCanAccessBranch(user, requestedBranchId)) {
+    return NextResponse.json({ error: "forbidden", message: "غير مصرح لك بالوصول لهذا الفرع" }, { status: 403 });
+  }
+  const branchId = requestedBranchId || user.branchId || undefined;
   const status = req.nextUrl.searchParams.get("status") || undefined;
   const tickets = await listTickets({ tripId, branchId, status });
   return NextResponse.json({ tickets });

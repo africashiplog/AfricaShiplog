@@ -97,20 +97,58 @@ src/components/           Shared UI components
 src/proxy.ts              Route protection (session presence) + is edge of the request pipeline
 ```
 
+## Testing
+
+Integration tests exercise the service layer (business logic + real
+Postgres, not mocks) for the workflows where correctness matters most:
+seat double-booking, ticket refunds, parcel COD/delivery validation, cash
+register closing math and locking, and expense voiding.
+
+```bash
+# one-time setup
+sudo -u postgres psql -c "CREATE DATABASE africashiplog_test OWNER postgres;"
+DATABASE_URL="postgresql://postgres:<pw>@localhost:5432/africashiplog_test?schema=public" npx prisma migrate deploy
+
+npm test
+```
+
+`tests/setup.ts` points `DATABASE_URL` at `africashiplog_test` by default
+(override with `TEST_DATABASE_URL`); each test file truncates all tables in
+`beforeEach`, so tests never touch your development data. Plain unit tests
+(no DB) live alongside their source files as `*.test.ts`.
+
 ## Security notes
 
 - All permission checks are enforced server-side in route handlers via
   `requireAuth(permissionCode)` — the UI hiding a button is never the only
-  gate.
+  gate. Every list/report/analytics endpoint that accepts a `branchId`
+  query parameter validates it against `userCanAccessBranch()` before using
+  it, so a branch-scoped user can't page through another branch's data by
+  editing the query string.
 - Passwords are hashed with bcrypt (12 rounds). Refresh tokens are stored
   hashed (SHA-256) — a database leak alone cannot be replayed as a session.
+  Login is rate-limited per IP.
+- The WhatsApp access token is encrypted at rest (AES-256-GCM) and only
+  ever exposed to the UI in masked form (`••••1234`).
 - Financial records (`FinancialTransaction`, `Expense`) are never hard-deleted;
   corrections are recorded as reversal/adjustment rows, preserving history.
+  There is no update/delete endpoint for `FinancialTransaction` anywhere in
+  the API — closing a cash session "locks" its transactions simply because
+  nothing can ever modify them, closed or not.
 - Security headers (CSP, X-Frame-Options, etc.) are set globally in
-  `next.config.ts`.
-- `npm audit` currently reports advisories in Prisma's CLI-only dependency
-  chain (`@prisma/config` → `deepmerge-ts`), not in the runtime client. See
-  the Phase 11 checkpoint notes for the reassessment.
+  `next.config.ts`. Auth cookies are `httpOnly`, `SameSite=Lax`, and
+  `Secure` in production, which blocks cross-site state-changing requests
+  without a separate CSRF token.
+- All database access goes through Prisma's parameterized query builder;
+  the only raw SQL in the repo is a `TRUNCATE` in the test helpers, built
+  from table names read back from `pg_catalog`, never from user input.
+- `npm audit` reports advisories in Prisma's CLI-only dependency chain
+  (`prisma` → `@prisma/config` → `deepmerge-ts`, a stack-exhaustion DoS in a
+  config-merging helper). This package is invoked only by `npx prisma ...`
+  commands during development/deployment and is never imported by the
+  running application, so it does not reach production request handling.
+  Re-check `npm audit` before pinning a newer Prisma release that resolves
+  it.
 
 ## Project status
 

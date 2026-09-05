@@ -10,7 +10,11 @@ export async function GET(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { user } = auth;
 
-  const branchId = req.nextUrl.searchParams.get("branchId") || user.branchId || undefined;
+  const requestedBranchId = req.nextUrl.searchParams.get("branchId") || undefined;
+  if (requestedBranchId && !userCanAccessBranch(user, requestedBranchId)) {
+    return NextResponse.json({ error: "forbidden", message: "غير مصرح لك بالوصول لهذا الفرع" }, { status: 403 });
+  }
+  const branchId = requestedBranchId || user.branchId || undefined;
   const categoryId = req.nextUrl.searchParams.get("categoryId") || undefined;
   const expenses = await listExpenses({ branchId, categoryId });
   return NextResponse.json({ expenses });

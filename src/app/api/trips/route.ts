@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/guard";
+import { userCanAccessBranch } from "@/lib/auth/current-user";
 import { tripInputSchema } from "@/lib/validation/trip";
 import { listTrips, createTrip, TripServiceError } from "@/services/trip-service";
 import { writeAuditLog } from "@/lib/audit";
@@ -7,8 +8,13 @@ import { writeAuditLog } from "@/lib/audit";
 export async function GET(req: NextRequest) {
   const auth = await requireAuth("trips.view");
   if (auth instanceof NextResponse) return auth;
+  const { user } = auth;
 
-  const branchId = req.nextUrl.searchParams.get("branchId") || undefined;
+  const requestedBranchId = req.nextUrl.searchParams.get("branchId") || undefined;
+  if (requestedBranchId && !userCanAccessBranch(user, requestedBranchId)) {
+    return NextResponse.json({ error: "forbidden", message: "غير مصرح لك بالوصول لهذا الفرع" }, { status: 403 });
+  }
+  const branchId = requestedBranchId || user.branchId || undefined;
   const status = req.nextUrl.searchParams.get("status") || undefined;
   const trips = await listTrips({ branchId, status });
   return NextResponse.json({ trips });
