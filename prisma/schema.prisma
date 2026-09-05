@@ -317,14 +317,6 @@ model Ticket {
   @@index([status])
 }
 
-enum PaymentMethodCode {
-  CASH
-  CARD
-  BANK_TRANSFER
-  ELECTRONIC
-  OTHER
-}
-
 model PaymentMethod {
   id                   String  @id @default(cuid())
   code                 String  @unique
