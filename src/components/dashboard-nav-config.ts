@@ -14,6 +14,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/branches", label: "الفروع", permission: "branches.view" },
   { href: "/dashboard/customers", label: "العملاء", permission: "customers.view" },
   { href: "/dashboard/trips", label: "الرحلات", permission: "trips.view" },
+  { href: "/dashboard/parcels", label: "الطرود", permission: "parcels.view" },
   { href: "/dashboard/fleet", label: "المركبات والسائقون", permission: "vehicles.manage" },
   { href: "/dashboard/cash-registers", label: "الصناديق النقدية", permission: "cash.view" },
   { href: "/dashboard/users", label: "المستخدمون", permission: "users.view" },
