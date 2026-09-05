@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/fleet", label: "المركبات والسائقون", permission: "vehicles.manage" },
   { href: "/dashboard/cash-registers", label: "الصناديق النقدية", permission: "cash.view" },
   { href: "/dashboard/expenses", label: "المصروفات", permission: "expenses.view" },
+  { href: "/dashboard/settings/whatsapp", label: "واتساب", permission: "whatsapp.manage" },
   { href: "/dashboard/users", label: "المستخدمون", permission: "users.view" },
   { href: "/dashboard/roles", label: "الأدوار والصلاحيات", permission: "roles.manage" },
 ];

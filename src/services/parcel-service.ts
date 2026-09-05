@@ -177,7 +177,7 @@ export async function updateParcelStatus(
     throw new ParcelServiceError("لا يمكن تغيير حالة طرد وصل إلى حالة نهائية", 400);
   }
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     await tx.parcelStatusHistory.create({
       data: {
         parcelId: id,
@@ -190,6 +190,14 @@ export async function updateParcelStatus(
     });
     return tx.parcel.update({ where: { id }, data: { status: newStatus as never } });
   });
+
+  if (newStatus === "ARRIVED") {
+    // Fire-and-forget: a WhatsApp outage must never fail the status update itself.
+    const { sendParcelArrivedNotification } = await import("@/services/whatsapp-service");
+    sendParcelArrivedNotification(id).catch(() => undefined);
+  }
+
+  return updated;
 }
 
 export interface DeliverParcelInput {
