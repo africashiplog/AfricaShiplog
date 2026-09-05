@@ -20,16 +20,56 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
-    environment:
+    environment: &app_env
       DATABASE_URL: postgresql://${POSTGRES_USER:-africashiplog}:${POSTGRES_PASSWORD:-africashiplog}@db:5432/${POSTGRES_DB:-africashiplog}?schema=public
       JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TOKEN_TTL_MINUTES: ${JWT_ACCESS_TOKEN_TTL_MINUTES:-15}
+      JWT_REFRESH_TOKEN_TTL_DAYS: ${JWT_REFRESH_TOKEN_TTL_DAYS:-7}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY}
+      WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-https://graph.facebook.com/v20.0}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      DEFAULT_CURRENCY: ${DEFAULT_CURRENCY:-XOF}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Africa/Nouakchott}
       NODE_ENV: production
     ports:
       - "${APP_PORT:-3000}:3000"
+
+  # One-off jobs — NOT started by `docker compose up`. Run explicitly:
+  #   docker compose run --rm migrate
+  #   docker compose run --rm seed     (development/demo data only)
+  # They target the `build` stage because it still has the full `prisma`
+  # CLI (a devDependency), which the pruned runtime image does not carry.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app_env
+    command: ["npx", "prisma", "migrate", "deploy"]
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app_env
+    command: ["npm", "run", "db:seed"]
 
 volumes:
   db_data:
