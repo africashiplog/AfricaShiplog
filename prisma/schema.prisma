@@ -1,0 +1,729 @@
+// ============================================================================
+// AfricaShiplog — Transport Agency Management System
+// Prisma schema (PostgreSQL)
+// ============================================================================
+// Conventions:
+// - Money fields use Decimal(14,2). Never use Float for currency.
+// - Financial records are never hard-deleted: corrections are recorded as
+//   reversal/adjustment transactions, never as row deletion or edits.
+// - `deletedAt` marks soft-deleted (archived) rows for non-financial entities.
+// - All timestamps are UTC; presentation-layer converts to the branch/agency
+//   timezone from SystemSetting.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// Access control: Users, Roles, Permissions
+// ----------------------------------------------------------------------------
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  phone              String?
+  passwordHash       String
+  fullName           String
+  fullNameAr         String?
+  branchId           String? // null => global access (e.g. Super Admin / General Manager)
+  branch             Branch?   @relation(fields: [branchId], references: [id])
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  roles                 UserRole[]
+  sessions              UserSession[]
+  auditLogs             AuditLog[]
+  ticketsSold           Ticket[]               @relation("TicketEmployee")
+  parcelsCreated        Parcel[]               @relation("ParcelCreatedBy")
+  parcelsDelivered      Parcel[]               @relation("ParcelDeliveredBy")
+  financialTransactions FinancialTransaction[]
+  expensesRecorded      Expense[]
+  cashSessionsOpened    CashRegisterSession[]  @relation("SessionOpenedBy")
+  cashSessionsClosed    CashRegisterSession[]  @relation("SessionClosedBy")
+  cashClosingsClosed    CashRegisterClosing[]  @relation("ClosingClosedBy")
+  cashClosingsReopened  CashRegisterClosing[]  @relation("ClosingReopenedBy")
+  parcelStatusChanges   ParcelStatusHistory[]
+
+  @@index([branchId])
+}
+
+// Refresh/session tracking for JWT-based auth (supports revocation & audit).
+model UserSession {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  refreshToken String    @unique
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  code        String   @unique // e.g. SUPER_ADMIN, BRANCH_MANAGER
+  name        String
+  nameAr      String
+  description String?
+  isSystem    Boolean  @default(false) // system roles cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id            String  @id @default(cuid())
+  code          String  @unique // e.g. tickets.create, parcels.deliver
+  module        String // e.g. tickets, parcels, cash-registers
+  action        String // e.g. view, create, edit, cancel, refund, approve
+  description   String?
+  descriptionAr String?
+
+  roles RolePermission[]
+
+  @@index([module])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id])
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+// ----------------------------------------------------------------------------
+// Branches
+// ----------------------------------------------------------------------------
+
+model Branch {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  name          String
+  nameAr        String
+  address       String?
+  city          String?
+  phone         String?
+  whatsappPhone String?
+  email         String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  users                 User[]
+  vehicles              Vehicle[]
+  drivers               Driver[]
+  tripsOrigin           Trip[]                 @relation("TripOrigin")
+  tripsDestination      Trip[]                 @relation("TripDestination")
+  ticketsSold           Ticket[]
+  parcelsOrigin         Parcel[]               @relation("ParcelOrigin")
+  parcelsDestination    Parcel[]               @relation("ParcelDestination")
+  cashRegisters         CashRegister[]
+  financialTransactions FinancialTransaction[]
+  expenses              Expense[]
+  auditLogs             AuditLog[]
+  parcelStatusHistory   ParcelStatusHistory[]
+
+  @@index([isActive])
+}
+
+// ----------------------------------------------------------------------------
+// Customers
+// ----------------------------------------------------------------------------
+
+enum CustomerType {
+  INDIVIDUAL
+  BUSINESS
+}
+
+model Customer {
+  id             String       @id @default(cuid())
+  name           String
+  phone          String
+  secondaryPhone String?
+  address        String?
+  notes          String?
+  type           CustomerType @default(INDIVIDUAL)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  tickets         Ticket[]
+  parcelsSent     Parcel[] @relation("ParcelSenderCustomer")
+  parcelsReceived Parcel[] @relation("ParcelRecipientCustomer")
+
+  @@unique([phone])
+  @@index([name])
+}
+
+// ----------------------------------------------------------------------------
+// Vehicles, Drivers, Trips, Seats, Tickets
+// ----------------------------------------------------------------------------
+
+model Vehicle {
+  id            String    @id @default(cuid())
+  plateNumber   String    @unique
+  type          String? // bus, minibus, van...
+  capacitySeats Int
+  branchId      String?
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+  isActive      Boolean   @default(true)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  trips Trip[]
+
+  @@index([branchId])
+}
+
+model Driver {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String?
+  licenseNumber String?
+  branchId      String?
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  trips Trip[]
+
+  @@index([branchId])
+}
+
+enum TripStatus {
+  SCHEDULED
+  BOARDING
+  DEPARTED
+  ARRIVED
+  CANCELLED
+}
+
+model Trip {
+  id                  String     @id @default(cuid())
+  tripNumber          String     @unique
+  vehicleId           String?
+  vehicle             Vehicle?   @relation(fields: [vehicleId], references: [id])
+  driverId            String?
+  driver              Driver?    @relation(fields: [driverId], references: [id])
+  originBranchId      String
+  originBranch        Branch     @relation("TripOrigin", fields: [originBranchId], references: [id])
+  destinationBranchId String
+  destinationBranch   Branch     @relation("TripDestination", fields: [destinationBranchId], references: [id])
+  departureDate       DateTime // date + time combined (UTC)
+  seatCapacity        Int
+  basePrice           Decimal    @db.Decimal(14, 2)
+  status              TripStatus @default(SCHEDULED)
+  notes               String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  deletedAt           DateTime?
+
+  seats   Seat[]
+  tickets Ticket[]
+
+  @@index([originBranchId, destinationBranchId, departureDate])
+  @@index([status])
+}
+
+enum SeatStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  BLOCKED
+}
+
+model Seat {
+  id         String     @id @default(cuid())
+  tripId     String
+  trip       Trip       @relation(fields: [tripId], references: [id])
+  seatNumber Int
+  status     SeatStatus @default(AVAILABLE)
+  ticket     Ticket?
+
+  @@unique([tripId, seatNumber])
+  @@index([tripId, status])
+}
+
+enum TicketStatus {
+  RESERVED
+  PAID
+  USED
+  CANCELLED
+  REFUNDED
+}
+
+model Ticket {
+  id             String       @id @default(cuid())
+  ticketNumber   String       @unique
+  tripId         String
+  trip           Trip         @relation(fields: [tripId], references: [id])
+  seatId         String       @unique
+  seat           Seat         @relation(fields: [seatId], references: [id])
+  customerId     String?
+  customer       Customer?    @relation(fields: [customerId], references: [id])
+  passengerName  String
+  passengerPhone String
+  originBranchId String
+  originBranch   Branch       @relation(fields: [originBranchId], references: [id])
+  basePrice      Decimal      @db.Decimal(14, 2)
+  discount       Decimal      @default(0) @db.Decimal(14, 2)
+  totalPrice     Decimal      @db.Decimal(14, 2) // basePrice - discount
+  amountPaid     Decimal      @default(0) @db.Decimal(14, 2)
+  balanceDue     Decimal      @default(0) @db.Decimal(14, 2) // totalPrice - amountPaid
+  status         TicketStatus @default(RESERVED)
+  employeeId     String
+  employee       User         @relation("TicketEmployee", fields: [employeeId], references: [id])
+  cancelReason   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  payments              TicketPayment[]
+  financialTransactions FinancialTransaction[]
+
+  @@index([tripId])
+  @@index([customerId])
+  @@index([passengerPhone])
+  @@index([status])
+}
+
+enum PaymentMethodCode {
+  CASH
+  CARD
+  BANK_TRANSFER
+  ELECTRONIC
+  OTHER
+}
+
+model PaymentMethod {
+  id                   String  @id @default(cuid())
+  code                 String  @unique
+  name                 String
+  nameAr               String
+  isActive             Boolean @default(true)
+  requiresCashRegister Boolean @default(false)
+
+  ticketPayments TicketPayment[]
+  parcelPayments ParcelPayment[]
+  transactions   FinancialTransaction[]
+  expenses       Expense[]
+}
+
+model TicketPayment {
+  id              String        @id @default(cuid())
+  ticketId        String
+  ticket          Ticket        @relation(fields: [ticketId], references: [id])
+  amount          Decimal       @db.Decimal(14, 2)
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  userId          String
+  createdAt       DateTime      @default(now())
+
+  financialTransaction FinancialTransaction?
+
+  @@index([ticketId])
+}
+
+// ----------------------------------------------------------------------------
+// Parcels / Shipments
+// ----------------------------------------------------------------------------
+
+enum ParcelStatus {
+  RECEIVED
+  REGISTERED
+  PROCESSING
+  DISPATCHED
+  IN_TRANSIT
+  ARRIVED
+  READY_FOR_PICKUP
+  DELIVERED
+  CANCELLED
+  RETURNED
+  LOST
+  DAMAGED
+}
+
+model Parcel {
+  id                  String       @id @default(cuid())
+  trackingNumber      String       @unique
+  senderCustomerId    String?
+  senderCustomer      Customer?    @relation("ParcelSenderCustomer", fields: [senderCustomerId], references: [id])
+  senderName          String
+  senderPhone         String
+  senderAddress       String?
+  recipientCustomerId String?
+  recipientCustomer   Customer?    @relation("ParcelRecipientCustomer", fields: [recipientCustomerId], references: [id])
+  recipientName       String
+  recipientPhone      String
+  recipientAddress    String?
+  description         String?
+  piecesCount         Int          @default(1)
+  weightKg            Decimal?     @db.Decimal(10, 2)
+  lengthCm            Decimal?     @db.Decimal(10, 2)
+  widthCm             Decimal?     @db.Decimal(10, 2)
+  heightCm            Decimal?     @db.Decimal(10, 2)
+  serviceType         String? // e.g. standard, express
+  originBranchId      String
+  originBranch        Branch       @relation("ParcelOrigin", fields: [originBranchId], references: [id])
+  destinationBranchId String
+  destinationBranch   Branch       @relation("ParcelDestination", fields: [destinationBranchId], references: [id])
+  shippingPrice       Decimal      @db.Decimal(14, 2)
+  discount            Decimal      @default(0) @db.Decimal(14, 2)
+  totalShippingPrice  Decimal      @db.Decimal(14, 2)
+  amountDueOnDelivery Decimal      @default(0) @db.Decimal(14, 2) // cash-on-delivery amount
+  status              ParcelStatus @default(RECEIVED)
+  notes               String?
+  createdById         String
+  createdBy           User         @relation("ParcelCreatedBy", fields: [createdById], references: [id])
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  deliveredAt             DateTime?
+  deliveredById           String?
+  deliveredBy             User?     @relation("ParcelDeliveredBy", fields: [deliveredById], references: [id])
+  deliveryRecipientName   String?
+  deliveryRecipientPhone  String?
+  deliveryAmountCollected Decimal?  @db.Decimal(14, 2)
+  deliverySignatureUrl    String?
+
+  items                 ParcelItem[]
+  statusHistory         ParcelStatusHistory[]
+  payments              ParcelPayment[]
+  whatsappMessages      WhatsAppMessage[]
+  financialTransactions FinancialTransaction[]
+
+  @@index([senderPhone])
+  @@index([recipientPhone])
+  @@index([status])
+  @@index([originBranchId, destinationBranchId])
+}
+
+model ParcelItem {
+  id          String   @id @default(cuid())
+  parcelId    String
+  parcel      Parcel   @relation(fields: [parcelId], references: [id])
+  description String
+  quantity    Int      @default(1)
+  weightKg    Decimal? @db.Decimal(10, 2)
+
+  @@index([parcelId])
+}
+
+model ParcelStatusHistory {
+  id             String        @id @default(cuid())
+  parcelId       String
+  parcel         Parcel        @relation(fields: [parcelId], references: [id])
+  previousStatus ParcelStatus?
+  newStatus      ParcelStatus
+  note           String?
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  branchId       String
+  branch         Branch        @relation(fields: [branchId], references: [id])
+  createdAt      DateTime      @default(now())
+
+  @@index([parcelId, createdAt])
+}
+
+enum ParcelPaymentType {
+  SHIPPING_FEE
+  COD_COLLECTION
+  REFUND
+}
+
+model ParcelPayment {
+  id              String            @id @default(cuid())
+  parcelId        String
+  parcel          Parcel            @relation(fields: [parcelId], references: [id])
+  type            ParcelPaymentType
+  amount          Decimal           @db.Decimal(14, 2)
+  paymentMethodId String
+  paymentMethod   PaymentMethod     @relation(fields: [paymentMethodId], references: [id])
+  userId          String
+  createdAt       DateTime          @default(now())
+
+  financialTransaction FinancialTransaction?
+
+  @@index([parcelId])
+}
+
+// ----------------------------------------------------------------------------
+// Cash registers, closings, financial transactions, expenses
+// ----------------------------------------------------------------------------
+
+model CashRegister {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  sessions CashRegisterSession[]
+
+  @@index([branchId])
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+  REOPENED
+}
+
+model CashRegisterSession {
+  id             String            @id @default(cuid())
+  cashRegisterId String
+  cashRegister   CashRegister      @relation(fields: [cashRegisterId], references: [id])
+  openedById     String
+  openedBy       User              @relation("SessionOpenedBy", fields: [openedById], references: [id])
+  openedAt       DateTime          @default(now())
+  openingBalance Decimal           @db.Decimal(14, 2)
+  status         CashSessionStatus @default(OPEN)
+  closedById     String?
+  closedBy       User?             @relation("SessionClosedBy", fields: [closedById], references: [id])
+  closedAt       DateTime?
+
+  transactions FinancialTransaction[]
+  expenses     Expense[]
+  closing      CashRegisterClosing?
+
+  @@index([cashRegisterId, status])
+}
+
+model CashRegisterClosing {
+  id               String              @id @default(cuid())
+  sessionId        String              @unique
+  session          CashRegisterSession @relation(fields: [sessionId], references: [id])
+  closedById       String
+  closedBy         User                @relation("ClosingClosedBy", fields: [closedById], references: [id])
+  closedAt         DateTime            @default(now())
+  ticketRevenue    Decimal             @db.Decimal(14, 2)
+  parcelRevenue    Decimal             @db.Decimal(14, 2)
+  codRevenue       Decimal             @db.Decimal(14, 2)
+  expensesTotal    Decimal             @db.Decimal(14, 2)
+  refundsTotal     Decimal             @db.Decimal(14, 2)
+  revenueByMethod  Json // snapshot breakdown: { CASH: 100, CARD: 50, ... }
+  expectedCash     Decimal             @db.Decimal(14, 2)
+  actualCash       Decimal             @db.Decimal(14, 2)
+  differenceAmount Decimal             @db.Decimal(14, 2) // actualCash - expectedCash
+  differenceReason String?
+  reopenedAt       DateTime?
+  reopenedById     String?
+  reopenedBy       User?               @relation("ClosingReopenedBy", fields: [reopenedById], references: [id])
+  reopenReason     String?
+
+  @@index([closedAt])
+}
+
+enum FinancialTransactionType {
+  TICKET_SALE
+  PARCEL_FEE
+  COD_COLLECTION
+  EXPENSE
+  REFUND
+  ADJUSTMENT
+  TRANSFER
+  DEPOSIT
+  WITHDRAWAL
+}
+
+model FinancialTransaction {
+  id                    String                   @id @default(cuid())
+  referenceNumber       String                   @unique
+  type                  FinancialTransactionType
+  amount                Decimal                  @db.Decimal(14, 2) // always positive; direction implied by type
+  currency              String                   @default("XOF")
+  paymentMethodId       String
+  paymentMethod         PaymentMethod            @relation(fields: [paymentMethodId], references: [id])
+  branchId              String
+  branch                Branch                   @relation(fields: [branchId], references: [id])
+  cashRegisterSessionId String?
+  cashRegisterSession   CashRegisterSession?     @relation(fields: [cashRegisterSessionId], references: [id])
+  userId                String
+  user                  User                     @relation(fields: [userId], references: [id])
+  occurredAt            DateTime                 @default(now())
+  notes                 String?
+
+  // Links to source operations (exactly one is normally set, depending on `type`)
+  ticketId        String?
+  ticket          Ticket?        @relation(fields: [ticketId], references: [id])
+  ticketPaymentId String?        @unique
+  ticketPayment   TicketPayment? @relation(fields: [ticketPaymentId], references: [id])
+  parcelId        String?
+  parcel          Parcel?        @relation(fields: [parcelId], references: [id])
+  parcelPaymentId String?        @unique
+  parcelPayment   ParcelPayment? @relation(fields: [parcelPaymentId], references: [id])
+  expenseId       String?        @unique
+  expense         Expense?       @relation(fields: [expenseId], references: [id])
+
+  // Reversal / adjustment chain — corrections never edit or delete history.
+  reversalOfId    String?
+  reversalOf      FinancialTransaction?  @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversals       FinancialTransaction[] @relation("Reversal")
+  transferGroupId String? // links the paired debit/credit rows of a cash transfer
+
+  createdAt DateTime @default(now())
+
+  @@index([branchId, occurredAt])
+  @@index([type])
+  @@index([cashRegisterSessionId])
+}
+
+model ExpenseCategory {
+  id        String  @id @default(cuid())
+  code      String  @unique
+  name      String
+  nameAr    String
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false)
+
+  expenses Expense[]
+}
+
+model Expense {
+  id                    String               @id @default(cuid())
+  branchId              String
+  branch                Branch               @relation(fields: [branchId], references: [id])
+  categoryId            String
+  category              ExpenseCategory      @relation(fields: [categoryId], references: [id])
+  amount                Decimal              @db.Decimal(14, 2)
+  paymentMethodId       String
+  paymentMethod         PaymentMethod        @relation(fields: [paymentMethodId], references: [id])
+  cashRegisterSessionId String?
+  cashRegisterSession   CashRegisterSession? @relation(fields: [cashRegisterSessionId], references: [id])
+  userId                String
+  user                  User                 @relation(fields: [userId], references: [id])
+  occurredAt            DateTime             @default(now())
+  description           String
+  referenceNumber       String?
+  attachmentUrl         String?
+  notes                 String?
+  voidedAt              DateTime?
+  voidReason            String?
+  createdAt             DateTime             @default(now())
+
+  financialTransaction FinancialTransaction?
+
+  @@index([branchId, occurredAt])
+  @@index([categoryId])
+}
+
+// ----------------------------------------------------------------------------
+// WhatsApp integration
+// ----------------------------------------------------------------------------
+
+enum WhatsAppMessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model NotificationTemplate {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. PARCEL_ARRIVED
+  name      String
+  bodyAr    String
+  bodyEn    String?
+  variables Json // documented placeholder list, e.g. ["recipientName","trackingNumber"]
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages WhatsAppMessage[]
+}
+
+model WhatsAppMessage {
+  id                String                @id @default(cuid())
+  parcelId          String?
+  parcel            Parcel?               @relation(fields: [parcelId], references: [id])
+  templateId        String?
+  template          NotificationTemplate? @relation(fields: [templateId], references: [id])
+  recipientPhone    String
+  renderedMessage   String
+  providerMessageId String?
+  status            WhatsAppMessageStatus @default(PENDING)
+  errorMessage      String?
+  retryCount        Int                   @default(0)
+  sentAt            DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([parcelId])
+  @@index([status])
+}
+
+model WhatsAppSettings {
+  id                   String    @id @default("singleton")
+  businessAccountId    String?
+  phoneNumberId        String?
+  accessTokenEncrypted String?
+  webhookVerifyToken   String?
+  isConnected          Boolean   @default(false)
+  lastTestedAt         DateTime?
+  updatedById          String?
+  updatedAt            DateTime  @updatedAt
+}
+
+// ----------------------------------------------------------------------------
+// Audit log & system settings
+// ----------------------------------------------------------------------------
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+  action       String // e.g. LOGIN, TICKET_CANCEL, CASH_REOPEN
+  entityType   String
+  entityId     String?
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id])
+  previousData Json?
+  newData      Json?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
