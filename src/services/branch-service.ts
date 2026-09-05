@@ -23,18 +23,30 @@ export async function createBranch(input: BranchInput) {
   if (existing) {
     throw new BranchServiceError("رمز الفرع مستخدم بالفعل", 409);
   }
-  return prisma.branch.create({
-    data: {
-      code: input.code,
-      name: input.name,
-      nameAr: input.nameAr,
-      address: input.address || null,
-      city: input.city || null,
-      phone: input.phone || null,
-      whatsappPhone: input.whatsappPhone || null,
-      email: input.email || null,
-      isActive: input.isActive ?? true,
-    },
+  return prisma.$transaction(async (tx) => {
+    const branch = await tx.branch.create({
+      data: {
+        code: input.code,
+        name: input.name,
+        nameAr: input.nameAr,
+        address: input.address || null,
+        city: input.city || null,
+        phone: input.phone || null,
+        whatsappPhone: input.whatsappPhone || null,
+        email: input.email || null,
+        isActive: input.isActive ?? true,
+      },
+    });
+    // Every branch needs at least one cash register to record cash transactions
+    // against; additional registers can be added later via the cash-registers module.
+    await tx.cashRegister.create({
+      data: {
+        branchId: branch.id,
+        code: `${branch.code}-01`,
+        name: "الصندوق الرئيسي",
+      },
+    });
+    return branch;
   });
 }
 

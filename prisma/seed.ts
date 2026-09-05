@@ -79,7 +79,7 @@ async function seedExpenseCategories() {
 }
 
 async function seedBranch() {
-  return prisma.branch.upsert({
+  const branch = await prisma.branch.upsert({
     where: { code: "HQ" },
     update: {},
     create: {
@@ -90,6 +90,14 @@ async function seedBranch() {
       isActive: true,
     },
   });
+
+  await prisma.cashRegister.upsert({
+    where: { code: "HQ-01" },
+    update: {},
+    create: { branchId: branch.id, code: "HQ-01", name: "الصندوق الرئيسي" },
+  });
+
+  return branch;
 }
 
 async function seedNotificationTemplate() {

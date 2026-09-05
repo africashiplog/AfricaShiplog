@@ -269,7 +269,10 @@ model Seat {
   trip       Trip       @relation(fields: [tripId], references: [id])
   seatNumber Int
   status     SeatStatus @default(AVAILABLE)
-  ticket     Ticket?
+  // One-to-many on purpose: a cancelled/refunded ticket frees the seat (status
+  // goes back to AVAILABLE) for a *new* ticket, so the seat can be resold —
+  // its full booking history is kept as multiple Ticket rows.
+  tickets    Ticket[]
 
   @@unique([tripId, seatNumber])
   @@index([tripId, status])
@@ -288,7 +291,7 @@ model Ticket {
   ticketNumber   String       @unique
   tripId         String
   trip           Trip         @relation(fields: [tripId], references: [id])
-  seatId         String       @unique
+  seatId         String
   seat           Seat         @relation(fields: [seatId], references: [id])
   customerId     String?
   customer       Customer?    @relation(fields: [customerId], references: [id])
@@ -312,6 +315,7 @@ model Ticket {
   financialTransactions FinancialTransaction[]
 
   @@index([tripId])
+  @@index([seatId])
   @@index([customerId])
   @@index([passengerPhone])
   @@index([status])
