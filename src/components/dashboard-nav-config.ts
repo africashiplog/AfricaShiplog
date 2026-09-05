@@ -12,6 +12,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "لوحة التحكم" },
   { href: "/dashboard/branches", label: "الفروع", permission: "branches.view" },
+  { href: "/dashboard/customers", label: "العملاء", permission: "customers.view" },
   { href: "/dashboard/users", label: "المستخدمون", permission: "users.view" },
   { href: "/dashboard/roles", label: "الأدوار والصلاحيات", permission: "roles.manage" },
 ];
