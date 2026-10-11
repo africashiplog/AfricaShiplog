@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/*
+ * الهوية البصرية: مستلهمة من غلاف الكتاب — أسود داكن، أخضر عميق، عنابي، ذهبي معتّق —
+ * على خلفية ورقية فاتحة للقراءة الطويلة.
+ */
+:root {
+  --ink: #15120f;          /* أسود داكن */
+  --ink-soft: #2a2520;
+  --green: #17432f;        /* أخضر عميق */
+  --green-soft: #2c6248;
+  --wine: #6b1d2a;         /* عنابي */
+  --wine-soft: #8b2d3c;
+  --gold: #b0894b;         /* ذهبي معتّق */
+  --gold-light: #d8bd85;
+  --parchment: #f7f2e7;
+  --paper: #fffdf7;
+  --line: #e4d9c3;
+  --muted: #6b6157;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-green: var(--green);
+  --color-green-soft: var(--green-soft);
+  --color-wine: var(--wine);
+  --color-wine-soft: var(--wine-soft);
+  --color-gold: var(--gold);
+  --color-gold-light: var(--gold-light);
+  --color-parchment: var(--parchment);
+  --color-paper: var(--paper);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-body), "Noto Naskh Arabic", "Amiri", "Segoe UI", Tahoma, sans-serif;
+  --font-display: var(--font-display), "Amiri", "Noto Naskh Arabic", serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--parchment);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  line-height: 1.85;
+}
+
+h1, h2, h3, .font-display { font-family: var(--font-display); line-height: 1.4; }
+
+/* زخرفة هندسية (نجمة ثمانية) بخط ذهبي خفيف */
+.ornament {
+  background-color: var(--ink);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 56 56'%3E%3Cg fill='none' stroke='%23b0894b' stroke-opacity='.22' stroke-width='1'%3E%3Cpath d='M28 4l7 17 17 7-17 7-7 17-7-17-17-7 17-7z'/%3E%3Crect x='16' y='16' width='24' height='24' transform='rotate(45 28 28)'/%3E%3Crect x='16' y='16' width='24' height='24'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.gold-rule {
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--gold) 15%, var(--gold-light) 50%, var(--gold) 85%, transparent);
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgb(21 18 15 / 0.04);
+}
+
+.prose-ar { white-space: pre-line; }
+.prose-ar p + p { margin-top: 0.75rem; }
+
+/* Numbers and coordinates stay LTR inside RTL text */
+.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+
+/* Form controls */
+.input {
+  width: 100%;
+  border: 1px solid #d6c9ae;
+  background: #fff;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+.input:focus { outline: 2px solid var(--gold); outline-offset: 0; border-color: var(--gold); }
+textarea.input { min-height: 7rem; line-height: 1.8; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  border-radius: 0.5rem; padding: 0.5rem 1rem; font-weight: 600; font-size: 0.95rem;
+  transition: background-color .15s, color .15s, border-color .15s;
+  cursor: pointer; white-space: nowrap;
+}
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: var(--green); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--green-soft); }
+.btn-gold { background: var(--gold); color: var(--ink); }
+.btn-gold:hover:not(:disabled) { background: var(--gold-light); }
+.btn-wine { background: var(--wine); color: #fff; }
+.btn-wine:hover:not(:disabled) { background: var(--wine-soft); }
+.btn-ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--gold); background: #fffaf0; }
+.btn-sm { padding: 0.25rem 0.65rem; font-size: 0.85rem; }
+
+a.link { color: var(--green); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 4px; }
+a.link:hover { color: var(--wine); }
+
+/* Leaflet: RTL page, LTR map internals */
+.leaflet-container { direction: ltr; font-family: var(--font-sans); z-index: 0; }
+.leaflet-popup-content { direction: rtl; text-align: right; font-family: var(--font-sans); }
+.igidi-marker {
+  width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  border: 2px solid var(--gold-light); box-shadow: 0 2px 6px rgb(0 0 0 / .35);
+}
+.igidi-marker.confirmed { background: var(--green); }
+.igidi-marker.approximate { background: var(--wine); border-style: dashed; }
+.igidi-marker.area { background: #8a7a62; border-style: dotted; }
+
+@media print {
+  header, footer, nav, .no-print { display: none !important; }
+  body { background: #fff; }
+}

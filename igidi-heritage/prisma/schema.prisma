@@ -1,0 +1,660 @@
+// ============================================================================
+// الخريطة التاريخية لمدافن الشمشوية في إيگيدي وضواحيها
+// Prisma schema (PostgreSQL)
+// ============================================================================
+// Principles (enforced in the service layer, documented here):
+// - Nothing is invented: every historical field is optional so partial records
+//   can be created and completed later; "unknown" is represented by NULL.
+// - Every factual claim can carry citations (Citation) and an explicit
+//   documentation status (VerificationStatus). The status describes the state
+//   of the available documentation, not a final verdict on the truth.
+// - Only PUBLISHED records (and links between published records) are visible
+//   on the public site.
+// - Every create/update/delete/status change is written to Revision with a full
+//   snapshot, so nothing is lost when data is corrected.
+// - `searchText` columns hold an Arabic-normalized copy of all names for
+//   accent/hamza-insensitive search (pg_trgm GIN indexes added in migration).
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+
+}
+
+// ----------------------------------------------------------------------------
+// Shared enums
+// ----------------------------------------------------------------------------
+
+/// حالة التوثيق المتاحة (وصف لحالة التوثيق، لا حكم نهائي)
+enum VerificationStatus {
+  DOCUMENTED // موثقة بمصدر مباشر
+  MULTI_SOURCE // مدعومة بأكثر من مصدر
+  ORAL // منقولة عن رواية شفوية
+  DISPUTED // مختلف فيها بين المصادر
+  UNVERIFIED // غير متحقق منها بعد
+}
+
+/// دورة حياة السجل التحريرية
+enum RecordStatus {
+  DRAFT // مسودة
+  IN_REVIEW // قيد المراجعة
+  PUBLISHED // منشور
+  ARCHIVED // مؤرشف (حذف ناعم)
+}
+
+enum UserRole {
+  ADMIN // مدير النظام: كل الصلاحيات + المستخدمون + الاستيراد + الحذف النهائي
+  REVIEWER // مراجع: التحرير + النشر + الأرشفة
+  EDITOR // محرر: إنشاء وتعديل المسودات وإرسالها للمراجعة
+  VIEWER // مطّلع: قراءة بيانات الإدارة فقط
+}
+
+enum NameLanguage {
+  AR // العربية الفصحى
+  HASSANIYA // الحسانية
+  BERBER // الأمازيغية/الصنهاجية
+  FR // الفرنسية
+  EN // الإنجليزية
+  OTHER
+}
+
+enum NameKind {
+  CANONICAL_VARIANT // صيغة أخرى للاسم المعتمد
+  LOCAL // اسم محلي
+  HISTORICAL // اسم تاريخي
+  SPELLING_VARIANT // تهجئة مختلفة
+  TRANSLATION // ترجمة
+  TRANSLITERATION // كتابة بالحروف اللاتينية
+  NICKNAME // لقب أو كنية
+}
+
+// ----------------------------------------------------------------------------
+// Users, sessions
+// ----------------------------------------------------------------------------
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String
+  passwordHash       String
+  role               UserRole  @default(EDITOR)
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  sessions  Session[]
+  revisions Revision[]
+  uploads   MediaFile[]
+}
+
+/// جلسات الدخول: يُخزَّن هاش الرمز فقط، والرمز نفسه في كوكي httpOnly
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// Reference taxonomies: regions, historical periods, families
+// ----------------------------------------------------------------------------
+
+/// المناطق والمواضع الجغرافية (هرمية: منطقة > قرية/موضع)
+model Region {
+  id           String   @id @default(cuid())
+  name         String
+  altNames     String[] @default([])
+  kind         String? // منطقة، بلدية، قرية، موضع، وادٍ...
+  description  String?
+  parentId     String?
+  parent       Region?  @relation("RegionTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Region[] @relation("RegionTree")
+  searchText   String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cemeteries Cemetery[]
+
+  @@unique([name, parentId])
+}
+
+/// الفترات التاريخية (يحددها الباحث)
+model HistoricalPeriod {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  startYearHijri     Int?
+  endYearHijri       Int?
+  startYearGregorian Int?
+  endYearGregorian   Int?
+  sortOrder   Int      @default(0)
+  searchText  String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cemeteries Cemetery[]
+  people     Person[]
+}
+
+/// الأسر والقبائل والبيوتات
+model Family {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  altNames    String[] @default([])
+  description String?
+  parentId    String?
+  parent      Family?  @relation("FamilyTree", fields: [parentId], references: [id], onDelete: SetNull)
+  branches    Family[] @relation("FamilyTree")
+  searchText  String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members Person[]
+}
+
+// ----------------------------------------------------------------------------
+// Cemeteries
+// ----------------------------------------------------------------------------
+
+model Cemetery {
+  id      String       @id @default(cuid())
+  slug    String       @unique
+  status  RecordStatus @default(DRAFT)
+  version Int          @default(1) // optimistic locking
+
+  // أ. الهوية والتسمية
+  canonicalName  String // الاسم المعتمد
+  localName      String? // الاسم المحلي/التاريخي بكتابته الأصلية
+  nameMeaning    String? // معنى الاسم
+  nameOrigin     String? // الأصل اللغوي
+  regionId       String?
+  region         Region? @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  locality       String? // القرية أو الموضع
+  adminArea      String? // المنطقة الإدارية
+
+  // ب. التاريخ (مفصول: التأسيس / أقدم ذكر / تواريخ الدفن في Burial)
+  foundingDateText       String?
+  foundingYearHijri      Int?
+  foundingYearGregorian  Int?
+  earliestMentionText    String?
+  earliestMentionYearHijri     Int?
+  earliestMentionYearGregorian Int?
+  earliestMentionSourceNote    String?
+
+  // ج/د. الوصف والروايات
+  summary                String? // وصف موجز للبطاقة
+  history                String? // الوصف التاريخي الشامل
+  communityRelations     String? // علاقته بالأسر والعلماء والجماعات
+  narrativeDifferences   String? // الاختلافات بين الروايات والمراجع
+  geographicDescription  String?
+  fieldNotes             String? // ملاحظات الباحث الميداني
+
+  /// حالة توثيق كل حقل: { "founding": "DOCUMENTED", ... } — تتجاوز الحالة المحسوبة من الاستشهادات
+  fieldStatus Json @default("{}")
+
+  searchText String @default("")
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  periods     HistoricalPeriod[]
+  names       CemeteryName[]
+  locations   Location[]
+  burials     Burial[]
+  events      HistoricalEvent[]
+  oralAccounts OralAccount[]
+  media       MediaFile[]
+  citations   Citation[]
+
+  @@index([status])
+  @@index([regionId])
+}
+
+/// الأسماء البديلة والتهجئات والترجمات
+model CemeteryName {
+  id         String       @id @default(cuid())
+  cemeteryId String
+  cemetery   Cemetery     @relation(fields: [cemeteryId], references: [id], onDelete: Cascade)
+  name       String
+  language   NameLanguage @default(AR)
+  kind       NameKind     @default(SPELLING_VARIANT)
+  note       String?
+  normalized String       @default("")
+  createdAt  DateTime     @default(now())
+
+  @@index([cemeteryId])
+}
+
+enum LocationPrecision {
+  EXACT // دقيق (ضمن أمتار)
+  APPROXIMATE // تقريبي (ضمن نصف قطر)
+  AREA // المنطقة العامة فقط
+  UNKNOWN // غير معلوم
+}
+
+enum LocationMethod {
+  FIELD_GPS // رصد ميداني بجهاز GPS
+  SATELLITE // تحديد من صور الأقمار الصناعية
+  OLD_MAP // من خريطة قديمة
+  SOURCE_DESCRIPTION // استنادًا إلى وصف في مصدر
+  ORAL_DESCRIPTION // استنادًا إلى رواية شفوية
+  ESTIMATE // تقدير المحرر
+}
+
+/// المواقع والإحداثيات — يمكن أن يكون للمدفن أكثر من موقع مقترح، واحد منها أساسي
+model Location {
+  id           String             @id @default(cuid())
+  cemeteryId   String
+  cemetery     Cemetery           @relation(fields: [cemeteryId], references: [id], onDelete: Cascade)
+  isPrimary    Boolean            @default(true)
+  latitude     Decimal?           @db.Decimal(9, 6)
+  longitude    Decimal?           @db.Decimal(9, 6)
+  precision    LocationPrecision  @default(UNKNOWN)
+  radiusMeters Int? // نصف قطر عدم اليقين للموقع التقريبي
+  method       LocationMethod?
+  sourceNote   String? // مصدر تحديد الموقع
+  description  String?
+  verification VerificationStatus @default(UNVERIFIED)
+  recordedAt   DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  citations Citation[]
+
+  @@index([cemeteryId])
+}
+
+// ----------------------------------------------------------------------------
+// People
+// ----------------------------------------------------------------------------
+
+model Person {
+  id      String       @id @default(cuid())
+  slug    String       @unique
+  status  RecordStatus @default(DRAFT)
+  version Int          @default(1)
+
+  fullName    String? // الاسم الكامل
+  commonName  String? // الاسم الشائع
+  titles      String? // الألقاب
+  nasab       String? // النسب المختصر
+  gender      String? // "M" | "F" | null
+  familyId    String?
+  family      Family? @relation(fields: [familyId], references: [id], onDelete: SetNull)
+
+  birthDateText        String?
+  birthYearHijri       Int?
+  birthYearGregorian   Int?
+  birthPlace           String?
+  deathDateText        String?
+  deathYearHijri       Int?
+  deathYearGregorian   Int?
+  deathPlace           String?
+
+  summary        String?
+  biography      String? // السيرة المفصلة
+  upbringing     String? // النشأة والبيئة التاريخية
+  travels        String? // الرحلات والإقامة والتنقلات
+  teachersText   String? // الشيوخ (نص حر لمن ليس لهم سجل)
+  studentsText   String? // التلاميذ (نص حر)
+  sciences       String? // العلوم والتخصصات والأنشطة
+  positions      String? // المناصب والأدوار
+  legacy         String? // الأثر
+  researcherNotes String?
+  corrections    String? // التصحيحات اللاحقة
+
+  /// شخص معاصر/على قيد الحياة: لا يُنشر إلا بموافقة موثقة
+  isContemporary     Boolean @default(false)
+  publicationConsent String? // وصف الموافقة (من، متى، كيف)
+
+  fieldStatus Json   @default("{}")
+  searchText  String @default("")
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  periods      HistoricalPeriod[]
+  names        PersonName[]
+  burials      Burial[]
+  relationsFrom PersonRelation[] @relation("RelationFrom")
+  relationsTo   PersonRelation[] @relation("RelationTo")
+  works        Work[]
+  events       HistoricalEvent[]
+  oralAccounts OralAccount[]
+  media        MediaFile[]
+  citations    Citation[]
+
+  @@index([status])
+  @@index([familyId])
+}
+
+model PersonName {
+  id         String       @id @default(cuid())
+  personId   String
+  person     Person       @relation(fields: [personId], references: [id], onDelete: Cascade)
+  name       String
+  language   NameLanguage @default(AR)
+  kind       NameKind     @default(SPELLING_VARIANT)
+  note       String?
+  normalized String       @default("")
+  createdAt  DateTime     @default(now())
+
+  @@index([personId])
+}
+
+enum BurialRelation {
+  BURIED // مدفون فيه (ثابت بحسب المصدر)
+  BURIED_PROBABLE // يُرجَّح دفنه فيه
+  BURIED_DISPUTED // مختلف في موضع دفنه
+  REINTERRED // نُقل رفاته إليه
+  FOUNDER // مؤسس المدفن أو أول من دُفن فيه
+  ASSOCIATED // مرتبط به دون ثبوت الدفن
+}
+
+/// علاقة الشخص بالمدفن — لا يُعتبر الشخص مدفونًا إلا بعلاقة BURIED ومصدرها
+model Burial {
+  id               String             @id @default(cuid())
+  personId         String
+  person           Person             @relation(fields: [personId], references: [id], onDelete: Cascade)
+  cemeteryId       String
+  cemetery         Cemetery           @relation(fields: [cemeteryId], references: [id], onDelete: Cascade)
+  relation         BurialRelation     @default(BURIED)
+  verification     VerificationStatus @default(UNVERIFIED)
+  burialDateText   String?
+  graveDescription String? // وصف القبر/الشاهد
+  note             String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  citations Citation[]
+
+  @@unique([personId, cemeteryId, relation])
+  @@index([cemeteryId])
+}
+
+enum PersonRelationType {
+  FATHER_OF // from أب لـ to
+  MOTHER_OF // from أم لـ to
+  SPOUSE_OF // زواج
+  SIBLING_OF // أخوة
+  OTHER_KIN // قرابة أخرى (تُشرح في الحقل note)
+  TEACHER_OF // from شيخ/أستاذ لـ to
+}
+
+/// الأنساب والعلاقات الأسرية والعلمية — لكل علاقة مصدر وحالة توثيق
+model PersonRelation {
+  id           String             @id @default(cuid())
+  fromId       String
+  from         Person             @relation("RelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId         String
+  to           Person             @relation("RelationTo", fields: [toId], references: [id], onDelete: Cascade)
+  type         PersonRelationType
+  kinLabel     String? // وصف القرابة عند OTHER_KIN (عم، خال، حفيد...)
+  verification VerificationStatus @default(UNVERIFIED)
+  note         String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  citations Citation[]
+
+  @@unique([fromId, toId, type])
+  @@index([toId])
+}
+
+/// المؤلفات والآثار العلمية
+model Work {
+  id          String   @id @default(cuid())
+  personId    String
+  person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  title       String
+  subject     String?
+  form        String? // نظم، شرح، فتوى...
+  state       String? // مخطوط، مطبوع، مفقود، غير معلوم
+  holdingNote String? // مكان حفظ المخطوط
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  citations Citation[]
+
+  @@index([personId])
+}
+
+/// الأحداث التاريخية المرتبطة بمدفن أو شخص
+model HistoricalEvent {
+  id                String             @id @default(cuid())
+  title             String
+  dateText          String?
+  yearHijri         Int?
+  yearGregorian     Int?
+  description       String?
+  verification      VerificationStatus @default(UNVERIFIED)
+  cemeteryId        String?
+  cemetery          Cemetery?          @relation(fields: [cemeteryId], references: [id], onDelete: Cascade)
+  personId          String?
+  person            Person?            @relation(fields: [personId], references: [id], onDelete: Cascade)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  citations Citation[]
+
+  @@index([cemeteryId])
+  @@index([personId])
+}
+
+/// الروايات الشفوية
+model OralAccount {
+  id             String             @id @default(cuid())
+  title          String
+  narrator       String? // الراوي (يُخفى علنًا ما لم يوافق)
+  narratorPublic Boolean            @default(false)
+  consentNote    String? // توثيق موافقة الراوي
+  recordedBy     String?
+  recordedAt     String? // نص حر للتاريخ
+  place          String?
+  content        String
+  verification   VerificationStatus @default(ORAL)
+  isPublic       Boolean            @default(false)
+  cemeteryId     String?
+  cemetery       Cemetery?          @relation(fields: [cemeteryId], references: [id], onDelete: SetNull)
+  personId       String?
+  person         Person?            @relation(fields: [personId], references: [id], onDelete: SetNull)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  media     MediaFile[]
+  citations Citation[]
+}
+
+// ----------------------------------------------------------------------------
+// Sources & citations
+// ----------------------------------------------------------------------------
+
+enum SourceType {
+  BOOK
+  MANUSCRIPT
+  ARTICLE
+  THESIS
+  ARCHIVE_DOCUMENT
+  MAP
+  ORAL_INTERVIEW
+  FIELD_SURVEY
+  WEBSITE
+  OTHER
+}
+
+model Source {
+  id               String     @id @default(cuid())
+  type             SourceType @default(BOOK)
+  title            String
+  author           String?
+  editor           String? // المحقق
+  publisher        String?
+  publicationPlace String?
+  year             String? // نص حر: 1430هـ / 2009م
+  edition          String?
+  volumes          String?
+  url              String?
+  description      String?
+  reliabilityNotes String? // ملاحظات حول الموثوقية
+  rightsNotes      String? // حقوق النشر
+  isPrimary        Boolean    @default(false) // المصدر الرئيس للمشروع
+  searchText       String     @default("")
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  citations Citation[]
+  media     MediaFile[]
+}
+
+/// استشهاد: يربط معلومة محددة (field) في سجل محدد بمصدر وصفحة.
+/// يرتبط بسجل واحد فقط (قيد CHECK في الهجرة).
+model Citation {
+  id       String  @id @default(cuid())
+  sourceId String
+  source   Source  @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  volume   String?
+  pages    String?
+  quote    String? // نص الاقتباس
+  summary  String? // ملخص
+  /// المعلومة المدعومة: general, names, founding, deathDate, nasab, location ...
+  field    String  @default("general")
+  note     String?
+  pageImageId String?
+  pageImage   MediaFile? @relation("CitationPageImage", fields: [pageImageId], references: [id], onDelete: SetNull)
+
+  cemeteryId    String?
+  cemetery      Cemetery?        @relation(fields: [cemeteryId], references: [id], onDelete: Cascade)
+  personId      String?
+  person        Person?          @relation(fields: [personId], references: [id], onDelete: Cascade)
+  burialId      String?
+  burial        Burial?          @relation(fields: [burialId], references: [id], onDelete: Cascade)
+  relationId    String?
+  relation      PersonRelation?  @relation(fields: [relationId], references: [id], onDelete: Cascade)
+  locationId    String?
+  location      Location?        @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  workId        String?
+  work          Work?            @relation(fields: [workId], references: [id], onDelete: Cascade)
+  eventId       String?
+  event         HistoricalEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  oralAccountId String?
+  oralAccount   OralAccount?     @relation(fields: [oralAccountId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sourceId])
+  @@index([cemeteryId])
+  @@index([personId])
+  @@index([burialId])
+  @@index([relationId])
+  @@index([locationId])
+}
+
+// ----------------------------------------------------------------------------
+// Media files
+// ----------------------------------------------------------------------------
+
+enum MediaKind {
+  PHOTO // صورة الموقع/المدفن
+  OLD_MAP // خريطة قديمة
+  GEO_DOCUMENT // وثيقة جغرافية
+  DOCUMENT // وثيقة
+  MANUSCRIPT // مخطوط
+  PAGE_SCAN // صورة صفحة من مصدر
+  AUDIO // تسجيل صوتي
+  OTHER
+}
+
+model MediaFile {
+  id           String    @id @default(cuid())
+  kind         MediaKind @default(PHOTO)
+  originalName String
+  storedName   String    @unique
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  title        String?
+  caption      String?
+  credit       String? // المصوّر/المالك
+  rights       String? // الترخيص وحقوق النشر
+  /// يُعرض للعامة فقط إذا كان مسموحًا ونُشر السجل المرتبط
+  isPublic     Boolean   @default(false)
+  uploadedById String?
+  uploadedBy   User?     @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  cemeteryId    String?
+  cemetery      Cemetery?    @relation(fields: [cemeteryId], references: [id], onDelete: SetNull)
+  personId      String?
+  person        Person?      @relation(fields: [personId], references: [id], onDelete: SetNull)
+  sourceId      String?
+  source        Source?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  oralAccountId String?
+  oralAccount   OralAccount? @relation(fields: [oralAccountId], references: [id], onDelete: SetNull)
+
+  citedBy Citation[] @relation("CitationPageImage")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cemeteryId])
+  @@index([personId])
+  @@index([sha256])
+}
+
+// ----------------------------------------------------------------------------
+// Audit / revisions & settings
+// ----------------------------------------------------------------------------
+
+enum RevisionAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  RESTORE
+  IMPORT
+}
+
+/// سجل التعديلات: لقطة كاملة بعد كل تغيير + الفروق
+model Revision {
+  id         String         @id @default(cuid())
+  entityType String // Cemetery, Person, Source, Burial, PersonRelation, ...
+  entityId   String
+  action     RevisionAction
+  summary    String?
+  changes    Json? // { field: { from, to } }
+  snapshot   Json? // الحالة بعد التغيير
+  userId     String?
+  user       User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime       @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
