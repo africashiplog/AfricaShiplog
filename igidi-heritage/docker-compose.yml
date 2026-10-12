@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: igidi
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+      POSTGRES_DB: igidi
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U igidi"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://igidi:${DB_PASSWORD:-change-me}@db:5432/igidi?schema=public
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "3000:3000"
+
+  # Nightly backup of the database and uploaded files, kept 30 days
+  backup:
+    image: postgres:16-alpine
+    depends_on: [db]
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-change-me}
+    volumes:
+      - ./backups:/backups
+      - uploads:/data/uploads:ro
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "-c", "while true; do DB_HOST=db sh /backup.sh; sleep 86400; done"]
+
+volumes:
+  db-data:
+  uploads:
